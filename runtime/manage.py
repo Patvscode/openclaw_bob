@@ -1,0 +1,1 @@
+/home/pmello/.openclaw/workspace/openclaw_workspace/runtime/manage.py

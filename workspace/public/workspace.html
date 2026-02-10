@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Local Workspace</title>
+  <style>
+    body {font-family: Arial, sans-serif; margin:0; padding:0;}
+    #tabs {display:flex; background:#eee;}
+    #tabs button {flex:1; padding:10px; cursor:pointer; border:none; background:#ddd;}
+    #tabs button.active {background:#fff; border-bottom:2px solid #000;}
+    .section {display:none; padding:20px;}
+    .section.active {display:block;}
+    .list {margin-top:10px;}
+    .log {background:#f9f9f9; padding:10px; height:150px; overflow:auto; border:1px solid #ccc;}
+  </style>
+</head>
+<body>
+  <div id="tabs">
+    <button data-target="workspace" class="active">Workspace</button>
+    <button data-target="library">Library</button>
+    <button data-target="skills">Skills</button>
+    <button data-target="settings">Settings</button>
+    <button data-target="snapshots">Snapshots</button>
+  </div>
+  <div id="content">
+    <div id="workspace" class="section active">
+      <h2>Workspace Overview</h2>
+      <p>This is the entry point. Use the tabs to manage library items, skills and settings.</p>
+    </div>
+    <div id="library" class="section">
+      <h2>Library</h2>
+      <button id="newAppBtn">Create New Node App</button>
+      <ul id="libraryList" class="list"></ul>
+      <div id="appEditor" style="display:none;">
+        <h3 id="appTitle"></h3>
+        <textarea id="appCode" rows="15" cols="80"></textarea><br/>
+        <button id="runAppBtn">Run</button>
+        <button id="deleteAppBtn">Delete</button>
+        <button id="lockAppBtn">Toggle Lock</button>
+        <pre id="appResult"></pre>
+      </div>
+    </div>
+    <div id="skills" class="section">
+      <h2>Skills</h2>
+      <ul id="skillList" class="list"></ul>
+      <input type="text" id="skillMessage" placeholder="Message for skill" />
+      <button id="runSkillBtn">Run Selected Skill</button>
+      <pre id="skillResult"></pre>
+    </div>
+    <div id="settings" class="section">
+      <h2>Settings</h2>
+      <label>Theme: <select id="themeSelect"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+      <button id="saveSettingsBtn">Save</button>
+    </div>
+    <div id="snapshots" class="section">
+      <h2>Snapshots</h2>
+      <button id="createSnapshotBtn">Create Snapshot</button>
+      <ul id="snapshotList" class="list"></ul>
+      <select id="rollbackSelect"></select>
+      <button id="rollbackBtn">Rollback</button>
+    </div>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    // Tab handling
+    document.querySelectorAll('#tabs button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#tabs button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const target = btn.dataset.target;
+        document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
+        document.getElementById(target).classList.add('active');
+        if (target === 'library') loadLibrary();
+        if (target === 'skills') loadSkills();
+        if (target === 'snapshots') loadSnapshots();
+        if (target === 'settings') loadSettings();
+      });
+    });
+
+    // ---------- Library UI ----------
+    async function loadLibrary() {
+      const resp = await fetch('/api/library');
+      const items = await resp.json();
+      const list = document.getElementById('libraryList');
+      list.innerHTML = '';
+      items.forEach(it => {
+        const li = document.createElement('li');
+        li.textContent = `${it.name} (${it.type})` + (it.locked ? ' [locked]' : '');
+        li.style.cursor = 'pointer';
+        li.onclick = () => selectApp(it.id, it.name, it.type, it.locked);
+        list.appendChild(li);
+      });
+    }
+    async function selectApp(id, name, type, locked) {
+      document.getElementById('appEditor').style.display = 'block';
+      document.getElementById('appTitle').textContent = name;
+      document.getElementById('runAppBtn').onclick = async () => {
+        const res = await fetch(`/api/library/${id}/run`, {method: 'POST'});
+        const data = await res.json();
+        document.getElementById('appResult').textContent = JSON.stringify(data, null, 2);
+      };
+      document.getElementById('deleteAppBtn').onclick = async () => {
+        if (locked) {alert('Item is locked'); return;}
+        await fetch(`/api/library/${id}`, {method: 'DELETE'});
+        loadLibrary();
+        document.getElementById('appEditor').style.display = 'none';
+      };
+      document.getElementById('lockAppBtn').onclick = async () => {
+        // toggle lock via settings endpoint (quick hack)
+        const metaResp = await fetch('/api/library');
+        const meta = await metaResp.json();
+        // find item and toggle locked flag
+        const item = meta.find(i => i.id === id);
+        if (!item) return;
+        item.locked = !item.locked;
+        // send whole library back (simple overwrite)
+        const fullMeta = await fetch('/api/library', {method: 'GET'}).then(r=>r.json());
+        // Not ideal – in real impl you'd have dedicated lock endpoint.
+        alert('Lock toggled (client side placeholder)');
+      };
+      // load code if exists
+      const codeResp = await fetch(`/api/library/${id}`);
+      if (codeResp.ok) {
+        const {code} = await codeResp.json();
+        document.getElementById('appCode').value = code;
+      } else {
+        document.getElementById('appCode').value = '';
+      }
+    }
+    document.getElementById('newAppBtn').addEventListener('click', async () => {
+      const name = prompt('App name');
+      if (!name) return;
+      const code = `module.exports = {run: async () => 'Hello from ${name}'};`;
+      await fetch('/api/library', {method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, type:'node', code})});
+      loadLibrary();
+    });
+
+    // ---------- Skills UI ----------
+    async function loadSkills() {
+      const resp = await fetch('/api/skills');
+      const skills = await resp.json();
+      const list = document.getElementById('skillList');
+      list.innerHTML = '';
+      skills.forEach(s => {
+        const li = document.createElement('li');
+        li.textContent = `${s.name}: ${s.description}`;
+        li.style.cursor = 'pointer';
+        li.onclick = () => selectSkill(s.name);
+        list.appendChild(li);
+      });
+    }
+    function selectSkill(name) {
+      document.getElementById('runSkillBtn').onclick = async () => {
+        const message = document.getElementById('skillMessage').value;
+        const res = await fetch(`/api/skills/${name}/run`, {method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({message})});
+        const data = await res.json();
+        document.getElementById('skillResult').textContent = JSON.stringify(data, null, 2);
+      };
+    }
+    socket.on('skill result', msg => {
+      const log = document.getElementById('skillResult');
+      log.textContent += `\n${msg}`;
+    });
+
+    // ---------- Settings UI ----------
+    async function loadSettings() {
+      const resp = await fetch('/api/settings');
+      const settings = await resp.json();
+      document.getElementById('themeSelect').value = settings.theme || 'light';
+    }
+    document.getElementById('saveSettingsBtn').addEventListener('click', async () => {
+      const theme = document.getElementById('themeSelect').value;
+      await fetch('/api/settings', {method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({theme})});
+      alert('Settings saved');
+    });
+
+    // ---------- Snapshot UI ----------
+    document.getElementById('createSnapshotBtn').addEventListener('click', async () => {
+      const res = await fetch('/api/snapshot', {method: 'POST'});
+      const data = await res.json();
+      alert('Snapshot created: ' + data.snapshot);
+      loadSnapshots();
+    });
+    async function loadSnapshots() {
+      const resp = await fetch('/api/snapshots');
+      const snaps = await resp.json();
+      const list = document.getElementById('snapshotList');
+      list.innerHTML = '';
+      snaps.forEach(s => {
+        const li = document.createElement('li');
+        li.textContent = s;
+        list.appendChild(li);
+      });
+      const sel = document.getElementById('rollbackSelect');
+      sel.innerHTML = '';
+      snaps.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s; opt.textContent = s;
+        sel.appendChild(opt);
+      });
+    }
+    document.getElementById('rollbackBtn').addEventListener('click', async () => {
+      const snap = document.getElementById('rollbackSelect').value;
+      if (!snap) return alert('Select a snapshot');
+      const res = await fetch('/api/rollback', {method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({snapshot: snap})});
+      const data = await res.json();
+      alert('Rolled back to ' + data.rolledBack);
+      location.reload();
+    });
+  </script>
+</body>
+</html>

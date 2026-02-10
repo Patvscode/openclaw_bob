@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Workspace UI</title>
+<style>
+  body {font-family: Arial, sans-serif; margin:0; padding:0; display:flex; height:100vh;}
+  #sidebar {width:250px; background:#f0f0f0; overflow:auto; border-right:1px solid #ccc; padding:10px;}
+  #main {flex:1; display:flex; flex-direction:column;}
+  #tabs {display:flex; background:#ddd; padding:5px;}
+  .tab {padding:5px 10px; margin-right:5px; background:#eee; cursor:pointer; border-radius:3px;}
+  .tab.active {background:#fff; border:1px solid #bbb;}
+  #content {flex:1; overflow:auto; padding:10px;}
+  button {margin:2px;}
+</style>
+</head>
+<body>
+<div id="sidebar">
+  <h3>Libraries</h3>
+  <div id="libraryList"></div>
+  <button onclick="openAddLibraryModal()">Add Library</button>
+  <hr/>
+  <h3>Skills</h3>
+  <div id="skillList"></div>
+  <hr/>
+  <h3>Settings</h3>
+  <pre id="settingsDisplay"></pre>
+  <button onclick="refreshSettings()">Refresh Settings</button>
+  <hr/>
+  <h3>Snapshots</h3>
+  <div id="snapshotList"></div>
+  <button onclick="createSnapshot()">Create Snapshot</button>
+</div>
+<div id="main">
+  <div id="tabs"></div>
+  <div id="content"></div>
+</div>
+
+<!-- Modals -->
+<div id="modalOverlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
+  <div id="modal" style="background:#fff; padding:20px; border-radius:5px; width:400px; max-height:80vh; overflow:auto;"></div>
+</div>
+
+<script>
+let tabs = [];
+let activeTabId = null;
+
+function showModal(html){
+  document.getElementById('modal').innerHTML = html;
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+function closeModal(){
+  document.getElementById('modalOverlay').style.display = 'none';
+}
+
+// ----- Library -----
+async function loadLibraries(){
+  const res = await fetch('/api/library');
+  const libs = await res.json();
+  const container = document.getElementById('libraryList');
+  container.innerHTML='';
+  libs.forEach(lib=>{
+    const div = document.createElement('div');
+    div.textContent = `${lib.name} (${lib.type})`;
+    const viewBtn = document.createElement('button'); viewBtn.textContent='View'; viewBtn.onclick=()=>openLibraryTab(lib);
+    const runBtn = document.createElement('button'); runBtn.textContent='Run'; runBtn.onclick=()=>runLibrary(lib);
+    const delBtn = document.createElement('button'); delBtn.textContent='Delete'; delBtn.onclick=()=>deleteLibrary(lib);
+    div.appendChild(viewBtn); div.appendChild(runBtn); div.appendChild(delBtn);
+    container.appendChild(div);
+  });
+}
+function openAddLibraryModal(){
+  const html = `
+    <h3>Add Library</h3>
+    <label>Name: <input id='libName' type='text'/></label><br/>
+    <label>Type: <select id='libType'><option value='agent'>Agent</option><option value='skill'>Skill</option></select></label><br/>
+    <label>Code (optional):<br/><textarea id='libCode' rows='8' style='width:100%'></textarea></label><br/>
+    <button onclick='addLibrary()'>Add</button> <button onclick='closeModal()'>Cancel</button>
+  `;
+  showModal(html);
+}
+async function addLibrary(){
+  const name=document.getElementById('libName').value;
+  const type=document.getElementById('libType').value;
+  const code=document.getElementById('libCode').value;
+  const res=await fetch('/api/library',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,type,code})});
+  if(res.ok){closeModal(); loadLibraries();}
+  else alert('Error adding library');
+}
+function openLibraryTab(lib){
+  const tabId = `lib-${lib.id}`;
+  if(!document.getElementById(tabId)) createTab(tabId, lib.name, async()=>{
+    const resp=await fetch(`/api/library/${lib.id}`);
+    const data=await resp.json();
+    document.getElementById('content').innerHTML = `<pre>${escapeHtml(data.code)}</pre>`;
+  });
+  activateTab(tabId);
+}
+async function runLibrary(lib){
+  const res=await fetch(`/api/library/${lib.id}/run`,{method:'POST'});
+  const data=await res.json();
+  alert('Result: '+JSON.stringify(data.result,null,2));
+}
+async function deleteLibrary(lib){
+  if(!confirm('Delete '+lib.name+'?')) return;
+  const res=await fetch(`/api/library/${lib.id}`,{method:'DELETE'});
+  if(res.ok){loadLibraries();}
+  else alert('Delete failed');
+}
+
+// ----- Skills -----
+async function loadSkills(){
+  const res=await fetch('/api/skills');
+  const skills=await res.json();
+  const container=document.getElementById('skillList');
+  container.innerHTML='';
+  skills.forEach(skill=>{
+    const div=document.createElement('div');
+    div.textContent=skill.name;
+    const runBtn=document.createElement('button'); runBtn.textContent='Run';
+    runBtn.onclick=()=>runSkill(skill);
+    const viewBtn=document.createElement('button'); viewBtn.textContent='View';
+    viewBtn.onclick=()=>openSkillTab(skill);
+    div.appendChild(viewBtn); div.appendChild(runBtn);
+    container.appendChild(div);
+  });
+}
+function openSkillTab(skill){
+  const tabId=`skill-${skill.name}`;
+  if(!document.getElementById(tabId)) createTab(tabId, skill.name, async()=>{
+    const resp=await fetch(`/skills/${skill.name}.js`);
+    const code=await resp.text();
+    document.getElementById('content').innerHTML = `<pre>${escapeHtml(code)}</pre>`;
+  });
+  activateTab(tabId);
+}
+async function runSkill(skill){
+  const message=prompt('Message for skill '+skill.name+':');
+  if(message===null) return;
+  const res=await fetch(`/api/skills/${skill.name}/run`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});
+  const data=await res.json();
+  alert('Skill output: '+data.output);
+}
+
+// ----- Settings -----
+async function refreshSettings(){
+  const res=await fetch('/api/settings');
+  const data=await res.json();
+  document.getElementById('settingsDisplay').textContent=JSON.stringify(data,null,2);
+}
+
+// ----- Snapshots -----
+async function createSnapshot(){
+  const res=await fetch('/api/snapshot',{method:'POST'});
+  const data=await res.json();
+  alert('Snapshot created: '+data.snapshot);
+  loadSnapshots();
+}
+async function loadSnapshots(){
+  const res=await fetch('/api/snapshots');
+  const list=await res.json();
+  const container=document.getElementById('snapshotList');
+  container.innerHTML='';
+  list.forEach(name=>{
+    const div=document.createElement('div');
+    div.textContent=name;
+    const rollbackBtn=document.createElement('button'); rollbackBtn.textContent='Rollback';
+    rollbackBtn.onclick=()=>rollback(name);
+    div.appendChild(rollbackBtn);
+    container.appendChild(div);
+  });
+}
+async function rollback(snapshot){
+  if(!confirm('Rollback to '+snapshot+'?')) return;
+  const res=await fetch('/api/rollback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({snapshot})});
+  const data=await res.json();
+  alert('Rolled back to '+snapshot);
+  // reload UI after short delay to let server copy files
+  setTimeout(()=>location.reload(),1000);
+}
+
+// ----- Tab Management -----
+function createTab(id, title, loader){
+  const tabDiv=document.createElement('div');
+  tabDiv.className='tab';
+  tabDiv.id=id;
+  tabDiv.textContent=title;
+  tabDiv.onclick=()=>activateTab(id);
+  document.getElementById('tabs').appendChild(tabDiv);
+  tabs.push({id, loader});
+}
+function activateTab(id){
+  activeTabId=id;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id===id));
+  const tab = tabs.find(t=>t.id===id);
+  if(tab && tab.loader) tab.loader();
+}
+function createTab(id, title, loader){
+  const tab=document.createElement('div');
+  tab.className='tab';
+  tab.id=id;
+  tab.textContent=title;
+  tab.onclick=()=>activateTab(id);
+  const closeBtn=document.createElement('span');
+  closeBtn.textContent=' ✕';
+  closeBtn.style.marginLeft='5px';
+  closeBtn.style.cursor='pointer';
+  closeBtn.onclick=e=>{e.stopPropagation(); closeTab(id);};
+  tab.appendChild(closeBtn);
+  document.getElementById('tabs').appendChild(tab);
+  tabs.push({id, loader});
+}
+function closeTab(id){
+  const tab=document.getElementById(id);
+  if(tab) tab.remove();
+  tabs = tabs.filter(t=>t.id!==id);
+  if(activeTabId===id){
+    const next = tabs[0];
+    if(next) activateTab(next.id);
+    else {document.getElementById('content').innerHTML='';}
+  }
+}
+
+function escapeHtml(str){
+  return str.replace(/[&<>"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+}
+
+// Initial load
+loadLibraries();
+loadSkills();
+refreshSettings();
+loadSnapshots();
+</script>
+</body>
+</html>

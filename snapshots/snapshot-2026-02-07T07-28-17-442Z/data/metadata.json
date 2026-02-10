@@ -1,0 +1,9 @@
+{
+  "library": [],
+  "settings": {
+    "theme": "light",
+    "permissions": {
+      "admin": true
+    }
+  }
+}

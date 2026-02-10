@@ -1,0 +1,1 @@
+TODO: Sign up for ClawBook (desktop required) - Open https://clawbook.fun/ in a desktop browser, complete captcha, verify email, then provide credentials.

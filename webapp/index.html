@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dynamic Telegram Web App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {font-family: Arial, Helvetica, sans-serif; margin:0; padding:0; background:#f5f5f5;}
+        #app {padding: 1rem;}
+        .card {background:#fff; border-radius:8px; padding:1rem; margin-bottom:1rem; box-shadow:0 2px 4px rgba(0,0,0,0.1);}
+        .btn {background:#0088cc; color:#fff; border:none; padding:0.5rem 1rem; border-radius:4px; cursor:pointer;}
+        .btn:hover {background:#006fa1;}
+        input, textarea {width:100%; padding:0.5rem; margin-top:0.5rem; border:1px solid #ccc; border-radius:4px;}
+    </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+    // Helper: create an element with optional classes and innerHTML
+    const el = (tag, opts = {}, html = '') => {
+        const e = document.createElement(tag);
+        if (opts.class) e.className = opts.class;
+        if (opts.id) e.id = opts.id;
+        if (opts.type) e.type = opts.type;
+        if (opts.placeholder) e.placeholder = opts.placeholder;
+        if (opts.value !== undefined) e.value = opts.value;
+        e.innerHTML = html;
+        return e;
+    };
+
+    // Parse initData – Telegram injects it as a query string like "initData=..."
+    const parseInitData = () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const raw = urlParams.get('initData') || Telegram.WebApp.initData || '';
+        // initData is a URL‑encoded query string of key=value pairs
+        const data = {};
+        raw.split('&').forEach(pair => {
+            const [k, v] = pair.split('=');
+            if (k) data[decodeURIComponent(k)] = decodeURIComponent(v || '');
+        });
+        return data;
+    };
+
+    // The config can be passed in two ways:
+    // 1. As a JSON string in the initData under the key "config"
+    // 2. As a URL parameter "configUrl" pointing to a JSON file.
+    const loadConfig = async () => {
+        const init = parseInitData();
+        if (init.config) {
+            try {return JSON.parse(init.config);} catch(e) {console.error('Bad config JSON', e);}
+        }
+        if (init.configUrl) {
+            try {const resp = await fetch(init.configUrl); return await resp.json();} catch(e) {console.error('Failed to fetch config', e);}
+        }
+        // Fallback – a very simple default UI
+        return {
+            title: "Welcome",
+            description: "This is a fallback UI. Provide a \"config\" or \"configUrl\" in initData.",
+            components: []
+        };
+    };
+
+    const render = async () => {
+        const cfg = await loadConfig();
+        const app = document.getElementById('app');
+        // Header
+        const header = el('div', {class: 'card'});
+        header.innerHTML = `<h2>${cfg.title || 'App'}</h2>` + (cfg.description ? `<p>${cfg.description}</p>` : '');
+        app.appendChild(header);
+
+        // Render each component definition
+        (cfg.components || []).forEach(comp => {
+            const wrapper = el('div', {class: 'card'});
+            switch(comp.type) {
+                case 'text':
+                    wrapper.innerHTML = `<p>${comp.text}</p>`;
+                    break;
+                case 'input':
+                    wrapper.innerHTML = `<label>${comp.label || ''}<br/><input id="${comp.id}" placeholder="${comp.placeholder||''}"/></label>`;
+                    break;
+                case 'textarea':
+                    wrapper.innerHTML = `<label>${comp.label || ''}<br/><textarea id="${comp.id}" placeholder="${comp.placeholder||''}"></textarea></label`;
+                    break;
+                case 'button':
+                    const btn = el('button', {class: 'btn', id: comp.id}, comp.label || 'Button');
+                    btn.onclick = () => handleAction(comp.action, comp.id);
+                    wrapper.appendChild(btn);
+                    break;
+                case 'list':
+                    const ul = el('ul');
+                    (comp.items || []).forEach(item => {
+                        const li = el('li');
+                        li.textContent = item;
+                        ul.appendChild(li);
+                    });
+                    wrapper.appendChild(ul);
+                    break;
+                default:
+                    wrapper.innerHTML = `<pre>Unsupported component: ${JSON.stringify(comp)}</pre>`;
+            }
+            app.appendChild(wrapper);
+        });
+    };
+
+    // Simple action handler – currently supports "sendData" and "close"
+    const handleAction = (action, componentId) => {
+        const payload = {};
+        if (componentId) {
+            const el = document.getElementById(componentId);
+            if (el) payload[componentId] = el.value;
+        }
+        if (action === 'sendData') {
+            Telegram.WebApp.sendData(JSON.stringify(payload));
+        } else if (action === 'close') {
+            Telegram.WebApp.sendData(JSON.stringify(payload));
+            Telegram.WebApp.close();
+        } else {
+            console.warn('Unknown action', action);
+        }
+    };
+
+    // Initialise Telegram Web App UI (expand to fit content, etc.)
+    Telegram.WebApp.ready();
+    render();
+</script>
+</body>
+</html>

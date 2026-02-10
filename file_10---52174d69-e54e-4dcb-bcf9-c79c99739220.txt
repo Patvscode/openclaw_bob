@@ -1,0 +1,5 @@
+So I would like you to quickly just like get like a minimal viable product.
+So like on my on my DJX spark on my system just create a UI that you can see and interact with
+and I can see and interact with. So I want you to design it. I'll have it say hello. This is open
+clause. Dashboard for you and have a text box that I can type into and that you can
+see the type or see what I sent you through that text box.
